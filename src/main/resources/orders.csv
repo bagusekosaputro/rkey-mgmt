@@ -1,0 +1,11 @@
+﻿orderId,emailAddress,sku,quantity,price,itemName
+RK-478,john@example.com,MENS-156,2,50,Small Black T-Shirt
+RK-478,john@example.com,NIKE-7,1,110.75,Nike Air Jordans - Size 7
+RK-642,will@example.com,SOC-1,2,25.99,Soccer Ball
+RK-238,carly@example.com,MU-5091,3,15.25,Lip Gloss
+RK-238,carly@example.com,NIKE-56,1,75.5,Nike Medium Red Leggings
+RK-238,carly@example.com,MU-4129,2,22.85,Eye Shadow
+RK-912,karen@example.com,PAR-14,1,149.99,Chanel - CHANCE EAU FRAÎCHE Eau de Toilette
+RK-239,steve@example.com,MENS-156,1,50,Small Black T-Shirt
+RK-149,dalton@example.com,SOC-1,1,25.99,Soccer Ball
+RK-149,dalton@example.com,NIKE-143,1,249.99,Nike Mercurial Superfly 8 Elite FG Firm Ground Soccer Cleat
