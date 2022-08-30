@@ -15,5 +15,7 @@ public class ReturnOrder {
     private String orderId;
     @NonNull
     private String emailAddress;
+    @NonNull
     private String status;
+    private Double refundAmount;
 }

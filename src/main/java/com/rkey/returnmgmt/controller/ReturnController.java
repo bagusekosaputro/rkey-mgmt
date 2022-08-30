@@ -1,8 +1,11 @@
 package com.rkey.returnmgmt.controller;
 
 import com.rkey.returnmgmt.config.JWTUtils;
+import com.rkey.returnmgmt.enums.ReturnStatus;
 import com.rkey.returnmgmt.model.Order;
+import com.rkey.returnmgmt.model.ReturnOrder;
 import com.rkey.returnmgmt.repository.OrderRepository;
+import com.rkey.returnmgmt.repository.ReturnOrderRepository;
 import com.rkey.returnmgmt.view.request.PendingReturnRequest;
 import com.rkey.returnmgmt.view.request.QCStatusRequest;
 import com.rkey.returnmgmt.view.request.ReturnRequest;
@@ -31,14 +34,18 @@ import java.util.Map;
 @RestController
 public class ReturnController {
     private static final Logger log = LoggerFactory.getLogger(ReturnController.class);
+
     @Autowired
-    OrderRepository orderRepository;
+    ReturnOrderRepository returnOrderRepository;
     @Autowired
     JWTUtils jwtUtils;
+    @Autowired
+    ReturnStatus returnStatus;
 
     @PostMapping(value = "/pending/return")
     Map<String, String> pendingReturn(@RequestBody PendingReturnRequest body) {
         List<Order> orders = getPendingReturn(body.getOrderId(), body.getEmailAddress());
+        log.info("Order : {}", orders);
         Map<String, String> response = new HashMap<>();
         if (orders.isEmpty()) {
             response.put("message","Pending Return Not Found");
@@ -59,6 +66,7 @@ public class ReturnController {
             response.setMessage("Invalid Token");
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(response);
         }
+
         Map<String, String> responseBody = new HashMap<>();
         responseBody.put("orderId", "1333");
         response.setMessage("Success");
@@ -101,5 +109,23 @@ public class ReturnController {
             log.info("File not found");
         }
         return orders;
+    }
+
+    private ReturnOrder returnOrderProcess(ReturnRequest body) {
+        List<Order> orders = getPendingReturn(body.getOrderId(), body.getEmailAddress());
+        ReturnOrder result = null;
+        if (!orders.isEmpty()) {
+            ReturnOrder getOrder = returnOrderRepository.findByOrderIdAndEmailAddress(body.getOrderId(), body.getEmailAddress());
+            if (getOrder.equals(null)) {
+                ReturnOrder newReturnOrder = new ReturnOrder(
+                        body.getOrderId(),
+                        body.getEmailAddress(),
+                        returnStatus.AWAITING_APPROVAL.toString()
+
+                );
+                result = returnOrderRepository.save(newReturnOrder);
+            }
+        }
+        return result;
     }
 }
