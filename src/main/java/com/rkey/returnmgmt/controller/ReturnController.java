@@ -133,8 +133,39 @@ public class ReturnController {
         return orders;
     }
 
+    private List<Order> validateReturnOrder(String orderId, String email, List<String> skus) {
+        List<Order> orders = new ArrayList<>();
+        try {
+            String filename = "orders.csv";
+            InputStream is = this.getClass().getClassLoader().getResourceAsStream(filename);
+            InputStreamReader isr = new InputStreamReader(is);
+            BufferedReader br = new BufferedReader(isr);
+            String line;
+            while ((line = br.readLine()) != null) {
+                String[] order = line.split(",");
+                if (order[0].equals(orderId) && order[1].equals(email) && skus.contains(order[2])) {
+                    orders.add(new Order(order[0],
+                            order[1],
+                            order[2],
+                            Long.parseLong(order[3]),
+                            Double.parseDouble(order[4]),
+                            order[5]));
+                }
+
+            }
+            is.close();
+        } catch (IOException e) {
+            log.info("File not found");
+        }
+        return orders;
+    }
+
     private ReturnOrder returnOrderProcess(ReturnRequest body) {
-        List<Order> orders = getPendingReturn(body.getOrderId(), body.getEmailAddress());
+        List<String> skuList = new ArrayList<>();
+        for (ReturnItemRequest item : body.getItems()) {
+            skuList.add(item.getSku());
+        }
+        List<Order> orders = validateReturnOrder(body.getOrderId(), body.getEmailAddress(), skuList);
         ReturnOrder result = null;
         if (!orders.isEmpty()) {
             Double refundAmount = 0.00;
@@ -148,23 +179,13 @@ public class ReturnController {
 
                 result = returnOrderRepository.save(newReturnOrder);
                 Long orderId = result.getId();
-
-                for (ReturnItemRequest item : body.getItems()) {
-                    ReturnOrderItem newItem = new ReturnOrderItem();
-                    newItem.setOrderId(orderId);
-                    newItem.setSku(item.getSku());
-                    newItem.setQuantity(item.getQuantity());
-                    newItem.setPrice(item.getPrice());
-                    newItem.setItemName(item.getItemName());
-                    newItem.setStatus(ReturnStatus.AWAITING_APPROVAL.name());
-
-                    returnOrderItemRepository.save(newItem);
-                }
+                saveItems(body.getItems(), orderId);
             } else {
                 boolean validItems = validateReturnItems(getOrder.getId(), body.getItems());
                 if(!validItems) {
                     throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Item(s) in this order already returned");
                 }
+                saveItems(body.getItems(), getOrder.getId());
                 List<ReturnOrderItem> getItems = returnOrderItemRepository.findByOrderId(getOrder.getId());
                 for (ReturnOrderItem item : getItems) {
                     if (!item.getStatus().equals(QCEnum.REJECTED.name())) {
@@ -238,6 +259,20 @@ public class ReturnController {
             }
             order.get().setRefundAmount(refundAmount);
             returnOrderRepository.save(order.get());
+        }
+    }
+
+    private void saveItems(List<ReturnItemRequest> items, Long orderId) {
+        for (ReturnItemRequest item : items) {
+            ReturnOrderItem newItem = new ReturnOrderItem();
+            newItem.setOrderId(orderId);
+            newItem.setSku(item.getSku());
+            newItem.setQuantity(item.getQuantity());
+            newItem.setPrice(item.getPrice());
+            newItem.setItemName(item.getItemName());
+            newItem.setStatus(ReturnStatus.AWAITING_APPROVAL.name());
+
+            returnOrderItemRepository.save(newItem);
         }
     }
 }
