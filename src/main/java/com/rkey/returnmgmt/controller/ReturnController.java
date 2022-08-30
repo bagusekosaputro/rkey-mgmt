@@ -1,6 +1,6 @@
 package com.rkey.returnmgmt.controller;
 
-import com.rkey.returnmgmt.helper.JWTUtils;
+import com.rkey.returnmgmt.config.JWTUtils;
 import com.rkey.returnmgmt.model.Order;
 import com.rkey.returnmgmt.repository.OrderRepository;
 import com.rkey.returnmgmt.view.request.PendingReturnRequest;
@@ -13,6 +13,10 @@ import com.rkey.returnmgmt.view.response.ReturnResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.BufferedReader;
@@ -20,10 +24,11 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 @RestController
-@CrossOrigin
 public class ReturnController {
     private static final Logger log = LoggerFactory.getLogger(ReturnController.class);
     @Autowired
@@ -31,25 +36,34 @@ public class ReturnController {
     @Autowired
     JWTUtils jwtUtils;
 
-    @PostMapping("/pending/return")
-    PendingReturnResponse pendingReturn(@RequestBody PendingReturnRequest body) {
+    @PostMapping(value = "/pending/return")
+    Map<String, String> pendingReturn(@RequestBody PendingReturnRequest body) {
         List<Order> orders = getPendingReturn(body.getOrderId(), body.getEmailAddress());
-        PendingReturnResponse response = new PendingReturnResponse();
+        Map<String, String> response = new HashMap<>();
         if (orders.isEmpty()) {
-            response.setMessage("Pending Return Not Found");
-
-            response.setToken("");
+            response.put("message","Pending Return Not Found");
+            response.put("token", null);
         } else {
             String token = jwtUtils.generateToken(body);
-            response.setMessage("success");
-            response.setToken(token);
+            response.put("message","Success");
+            response.put("token", token);
         }
         return response;
     }
 
     @PostMapping("/returns")
-    ReturnResponse returnOrder(@RequestBody ReturnRequest body) {
-        return new ReturnResponse();
+    ResponseEntity<ReturnResponse> returnOrder(@RequestBody ReturnRequest body, @RequestHeader(value = "Authorization") String headerAuth) {
+        String validToken = jwtUtils.parseJWT(headerAuth);
+        ReturnResponse response = new ReturnResponse();
+        if (validToken == null) {
+            response.setMessage("Invalid Token");
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(response);
+        }
+        Map<String, String> responseBody = new HashMap<>();
+        responseBody.put("orderId", "1333");
+        response.setMessage("Success");
+        response.setData(responseBody);
+        return ResponseEntity.status(HttpStatus.OK).body(response);
     }
 
     @GetMapping("/returns/{id}")
@@ -87,10 +101,5 @@ public class ReturnController {
             log.info("File not found");
         }
         return orders;
-    }
-
-    private String generateToken(List<Order> orders) {
-        String signature = "";
-        return signature;
     }
 }
