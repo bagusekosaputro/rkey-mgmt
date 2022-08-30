@@ -1,35 +1,34 @@
 package com.rkey.returnmgmt.controller;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rkey.returnmgmt.config.JWTUtils;
+import com.rkey.returnmgmt.enums.QCEnum;
 import com.rkey.returnmgmt.enums.ReturnStatus;
 import com.rkey.returnmgmt.model.Order;
 import com.rkey.returnmgmt.model.ReturnOrder;
-import com.rkey.returnmgmt.repository.OrderRepository;
+import com.rkey.returnmgmt.model.ReturnOrderItem;
+import com.rkey.returnmgmt.repository.ReturnOrderItemRepository;
 import com.rkey.returnmgmt.repository.ReturnOrderRepository;
 import com.rkey.returnmgmt.view.request.PendingReturnRequest;
 import com.rkey.returnmgmt.view.request.QCStatusRequest;
+import com.rkey.returnmgmt.view.request.ReturnItemRequest;
 import com.rkey.returnmgmt.view.request.ReturnRequest;
-import com.rkey.returnmgmt.view.response.OrderResponse;
-import com.rkey.returnmgmt.view.response.PendingReturnResponse;
+import com.rkey.returnmgmt.view.response.GetOrderResponse;
 import com.rkey.returnmgmt.view.response.QCStatusResponse;
-import com.rkey.returnmgmt.view.response.ReturnResponse;
+import com.rkey.returnmgmt.view.response.ReturnOrderResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 @RestController
 public class ReturnController {
@@ -38,9 +37,9 @@ public class ReturnController {
     @Autowired
     ReturnOrderRepository returnOrderRepository;
     @Autowired
-    JWTUtils jwtUtils;
+    ReturnOrderItemRepository returnOrderItemRepository;
     @Autowired
-    ReturnStatus returnStatus;
+    JWTUtils jwtUtils;
 
     @PostMapping(value = "/pending/return")
     Map<String, String> pendingReturn(@RequestBody PendingReturnRequest body) {
@@ -59,29 +58,52 @@ public class ReturnController {
     }
 
     @PostMapping("/returns")
-    ResponseEntity<ReturnResponse> returnOrder(@RequestBody ReturnRequest body, @RequestHeader(value = "Authorization") String headerAuth) {
-        String validToken = jwtUtils.parseJWT(headerAuth);
-        ReturnResponse response = new ReturnResponse();
-        if (validToken == null) {
+    ResponseEntity<ReturnOrderResponse> returnOrder(@RequestBody ReturnRequest body, @RequestHeader(value = "Authorization") String headerAuth) {
+        String parseToken = jwtUtils.parseJWT(headerAuth);
+        ReturnOrderResponse response = new ReturnOrderResponse();
+        if (parseToken == null) {
             response.setMessage("Invalid Token");
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(response);
         }
-
-        Map<String, String> responseBody = new HashMap<>();
-        responseBody.put("orderId", "1333");
+        boolean validToken = jwtUtils.validateToken(parseToken, body.getOrderId(), body.getEmailAddress());
+        if (!validToken) {
+            response.setMessage("Token Mismatch");
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(response);
+        }
+        ReturnOrder returnOrder = returnOrderProcess(body);
+        Map<String, Object> responseBody = buildReturnOrderResponse(returnOrder);
         response.setMessage("Success");
         response.setData(responseBody);
         return ResponseEntity.status(HttpStatus.OK).body(response);
     }
 
     @GetMapping("/returns/{id}")
-    OrderResponse getReturnOrder(@PathVariable Long id) {
-        return new OrderResponse();
+    ResponseEntity<Map<String, Object>> getReturnOrder(@PathVariable Long id) {
+        Optional<ReturnOrder> validOrder = returnOrderRepository.findById(id);
+        ReturnOrderResponse response = new ReturnOrderResponse();
+        if (validOrder.isEmpty()){
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
+        }
+        Map<String, Object> responseBody = buildGetReturnOrderData(validOrder.get());
+        response.setMessage(HttpStatus.OK.getReasonPhrase());
+        return ResponseEntity.status(HttpStatus.OK).body(responseBody);
     }
 
     @PutMapping("/returns/{id}/items/{itemId}/status")
-    QCStatusResponse updateItemStatus(@PathVariable Long id, @PathVariable String itemId, @RequestBody QCStatusRequest body) {
-        return new QCStatusResponse();
+    ResponseEntity<QCStatusResponse> updateItemStatus(@PathVariable Long id, @PathVariable Long itemId, @RequestBody QCStatusRequest body) {
+        ReturnOrderItem item = returnOrderItemRepository.findByIdAndOrderId(itemId, id);
+        if (item == null) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
+        }
+
+        item.setStatus(body.getStatus().toString());
+        ReturnOrderItem updateItem = returnOrderItemRepository.save(item);
+        QCStatusResponse response = new QCStatusResponse();
+        reCalculateRefundAmount(id);
+        response.setData(updateItem);
+        response.setMessage(HttpStatus.OK.getReasonPhrase());
+
+        return ResponseEntity.status(HttpStatus.OK).body(response);
     }
 
     private List<Order> getPendingReturn(String orderId, String email) {
@@ -115,17 +137,107 @@ public class ReturnController {
         List<Order> orders = getPendingReturn(body.getOrderId(), body.getEmailAddress());
         ReturnOrder result = null;
         if (!orders.isEmpty()) {
+            Double refundAmount = 0.00;
             ReturnOrder getOrder = returnOrderRepository.findByOrderIdAndEmailAddress(body.getOrderId(), body.getEmailAddress());
-            if (getOrder.equals(null)) {
-                ReturnOrder newReturnOrder = new ReturnOrder(
-                        body.getOrderId(),
-                        body.getEmailAddress(),
-                        returnStatus.AWAITING_APPROVAL.toString()
+            if (getOrder == null) {
+                ReturnOrder newReturnOrder = new ReturnOrder();
+                newReturnOrder.setOrderId(body.getOrderId());
+                newReturnOrder.setEmailAddress(body.getEmailAddress());
+                newReturnOrder.setStatus(ReturnStatus.AWAITING_APPROVAL.name());
+                newReturnOrder.setRefundAmount(calculateRefundAmount(refundAmount, body.getItems()));
 
-                );
                 result = returnOrderRepository.save(newReturnOrder);
+                Long orderId = result.getId();
+
+                for (ReturnItemRequest item : body.getItems()) {
+                    ReturnOrderItem newItem = new ReturnOrderItem();
+                    newItem.setOrderId(orderId);
+                    newItem.setSku(item.getSku());
+                    newItem.setQuantity(item.getQuantity());
+                    newItem.setPrice(item.getPrice());
+                    newItem.setItemName(item.getItemName());
+                    newItem.setStatus(ReturnStatus.AWAITING_APPROVAL.name());
+
+                    returnOrderItemRepository.save(newItem);
+                }
+            } else {
+                boolean validItems = validateReturnItems(getOrder.getId(), body.getItems());
+                if(!validItems) {
+                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Item(s) in this order already returned");
+                }
+                List<ReturnOrderItem> getItems = returnOrderItemRepository.findByOrderId(getOrder.getId());
+                for (ReturnOrderItem item : getItems) {
+                    if (!item.getStatus().equals(QCEnum.REJECTED.name())) {
+                        refundAmount += (item.getPrice() * item.getQuantity());
+                    }
+                }
+                getOrder.setRefundAmount(refundAmount);
+                result = returnOrderRepository.save(getOrder);
             }
         }
         return result;
+    }
+
+    private Double calculateRefundAmount(Double refundAmount, List<ReturnItemRequest> returnItems) {
+        for(ReturnItemRequest item : returnItems) {
+            log.info("Calculate refund amount for item with sku: {}", item.getSku());
+            refundAmount += (item.getPrice() * item.getQuantity());
+        }
+
+        return refundAmount;
+    }
+
+    private Map<String, Object> buildReturnOrderResponse(ReturnOrder returnOrder) {
+        ObjectMapper mapper = new ObjectMapper();
+        Map<String, Object> result = mapper.convertValue(returnOrder, Map.class);
+        return result;
+    }
+
+    private Map<String, Object> buildGetReturnOrderData(ReturnOrder returnOrder) {
+        ObjectMapper mapper = new ObjectMapper();
+        GetOrderResponse data = new GetOrderResponse();
+        List<ReturnOrderItem> items = returnOrderItemRepository.findByOrderId(returnOrder.getId());
+        data.setOrder(returnOrder);
+        data.setItems(items);
+        Map<String, Object> result = mapper.convertValue(data, Map.class);
+
+        return result;
+    }
+
+    private boolean validateReturnItems(Long orderId, List<ReturnItemRequest> items) {
+        log.info("Validate return item(s) in order with Id: {}", orderId);
+        boolean result = true;
+        for (ReturnItemRequest item : items) {
+            ReturnOrderItem isExist = returnOrderItemRepository.findByOrderIdAndSku(orderId, item.getSku());
+            if (isExist != null) {
+                result = false;
+                break;
+            }
+        }
+
+        return result;
+    }
+
+    private void reCalculateRefundAmount(Long orderId) {
+        Optional<ReturnOrder> order = returnOrderRepository.findById(orderId);
+        Integer updatedStatus = 0;
+        if (order.isPresent()) {
+            List<ReturnOrderItem> items = returnOrderItemRepository.findByOrderId(orderId);
+            Double refundAmount = 0.00;
+            for (ReturnOrderItem item : items) {
+                if (!item.getStatus().equals(QCEnum.REJECTED.name())) {
+                    refundAmount += (item.getPrice() * item.getQuantity());
+                }
+
+                if(!item.getStatus().equals(ReturnStatus.AWAITING_APPROVAL.name())) {
+                    updatedStatus += 1;
+                }
+            }
+            if (items.size() == updatedStatus) {
+                order.get().setStatus(ReturnStatus.COMPLETED.name());
+            }
+            order.get().setRefundAmount(refundAmount);
+            returnOrderRepository.save(order.get());
+        }
     }
 }

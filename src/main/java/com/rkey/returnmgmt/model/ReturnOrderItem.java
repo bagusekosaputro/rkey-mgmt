@@ -1,15 +1,15 @@
 package com.rkey.returnmgmt.model;
 
 import lombok.Data;
+import lombok.NoArgsConstructor;
 import lombok.NonNull;
 
-import javax.persistence.Entity;
-import javax.persistence.GeneratedValue;
-import javax.persistence.GenerationType;
-import javax.persistence.Id;
+import javax.persistence.*;
 
 @Entity
 @Data
+@Table(name = "return_items")
+@NoArgsConstructor
 public class ReturnOrderItem {
     private @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY) Long id;
@@ -23,5 +23,6 @@ public class ReturnOrderItem {
     private Double price;
     @NonNull
     private String itemName;
+    @NonNull
     private String status;
 }

@@ -1,7 +1,9 @@
 package com.rkey.returnmgmt.config;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rkey.returnmgmt.view.request.PendingReturnRequest;
 import io.jsonwebtoken.*;
+import io.jsonwebtoken.lang.Maps;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -36,9 +38,14 @@ public class JWTUtils implements Serializable {
                 compact();
     }
 
-    public boolean validateToken(String token) {
+    public boolean validateToken(String token, String orderId, String emailAddress) {
         try {
-            Jwts.parser().setSigningKey(secret).parseClaimsJws(token);
+            Jwts.parser().setSigningKey(secret.getBytes()).parseClaimsJws(token);
+            Claims claims = getAllClaims(token);
+            if(!claims.getSubject().equals(emailAddress)) {
+                return false;
+            }
+            log.info("Validate token subject: {}", getAllClaims(token));
             return true;
         } catch (SignatureException e) {
             log.error("Invalid JWT Signature: {}", e.getMessage());
@@ -61,20 +68,20 @@ public class JWTUtils implements Serializable {
         return null;
     }
 
-    public String getEmailAddressFromToken(String token) {
-        return getClaim(token, Claims::getSubject);
-    }
-
-    public String getOrderIdFromToken(String token) {
-        return getClaim(token, Claims::getAudience);
-    }
-
     public <T> T getClaim(String token, Function<Claims, T> resolver) {
         final Claims claims = getAllClaims(token);
         return resolver.apply(claims);
     }
 
     private Claims getAllClaims(String token) {
-        return Jwts.parser().setSigningKey(secret).parseClaimsJws(token).getBody();
+        ObjectMapper mapper = new ObjectMapper();
+        return Jwts
+                .parserBuilder()
+//                .deserializeJsonWith(new JacksonDeserializer(Maps.of("body", PendingReturnRequest.class).build()))
+                .setSigningKey(secret.getBytes())
+                .build()
+                .parseClaimsJws(token)
+                .getBody();
+
     }
 }
